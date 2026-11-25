@@ -67,3 +67,81 @@ jobs:
 
       - name: "Run application tests"
         run: npm test
+
+  container-security:
+    name: "Dockerfile and container"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check out Git repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: "Lint Dockerfile"
+        run: |
+          mkdir -p reports
+          set -o pipefail
+          docker run --rm -i \
+            hadolint/hadolint:v2.12.0-debian \
+            /bin/hadolint --failure-threshold warning - < Dockerfile \
+            | tee reports/hadolint.txt
+
+      - name: "Build application image"
+        run: |
+          docker build \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg VCS_REF="${GITHUB_SHA}" \
+            --tag juice-shop:dev \
+            .
+
+      - name: "Scan container configuration"
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            aquasec/trivy:0.67.2 \
+            config --severity HIGH,CRITICAL --exit-code 1 \
+            --format sarif --output reports/trivy-config.sarif .
+
+      - name: "Scan container image"
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.67.2 \
+            image --severity HIGH,CRITICAL --exit-code 1 --format sarif \
+            --output /tmp/trivy-image.sarif juice-shop:dev
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.67.2 \
+            image --severity HIGH,CRITICAL --format table juice-shop:dev
+
+      - name: "Copy image scan report"
+        if: always()
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${GITHUB_WORKSPACE}/reports:/reports" \
+            aquasec/trivy:0.67.2 \
+            image --severity HIGH,CRITICAL --format sarif \
+            --output /reports/trivy-image.sarif juice-shop:dev
+
+      - name: "Generate SBOM"
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            anchore/syft:v1.20.0 \
+            juice-shop:dev -o cyclonedx-json \
+            > reports/sbom.cdx.json
+
+      - name: "Upload container reports"
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: container-security-reports
+          path: |
+            reports/hadolint.txt
+            reports/trivy-config.sarif
+            reports/trivy-image.sarif
+            reports/sbom.cdx.json
+          if-no-files-found: warn
+          retention-days: 30
