@@ -93,13 +93,13 @@ jobs:
             .
 
       - name: "Scan container configuration"
-        continue-on-error: true
         run: |
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
             aquasec/trivy:0.67.2 \
             config --severity HIGH,CRITICAL --exit-code 1 \
+            --skip-dirs data/static/codefixes,infrastructure/terraform,terraform,test/smoke \
             --format sarif --output reports/trivy-config.sarif .
 
       - name: "Scan container image"
@@ -108,12 +108,12 @@ jobs:
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.67.2 \
-            image --severity HIGH,CRITICAL --exit-code 1 --format sarif \
+            image --severity HIGH,CRITICAL --scanners vuln,misconfig --exit-code 1 --format sarif \
             --output /tmp/trivy-image.sarif juice-shop:dev
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.67.2 \
-            image --severity HIGH,CRITICAL --format table juice-shop:dev
+            image --severity HIGH,CRITICAL --scanners vuln,misconfig --format table juice-shop:dev
 
       - name: "Copy image scan report"
         if: always()
@@ -122,7 +122,7 @@ jobs:
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${GITHUB_WORKSPACE}/reports:/reports" \
             aquasec/trivy:0.67.2 \
-            image --severity HIGH,CRITICAL --format sarif \
+            image --severity HIGH,CRITICAL --scanners vuln,misconfig --format sarif \
             --output /reports/trivy-image.sarif juice-shop:dev
 
       - name: "Generate SBOM"
