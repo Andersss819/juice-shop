@@ -38,7 +38,8 @@ jobs:
       - name: "Scan source code with Semgrep"
         run: |
           mkdir -p reports
-          python3 -m semgrep scan --config auto --sarif --output reports/semgrep.sarif --error .
+          SEMGREP="$(python3 -m site --user-base)/bin/semgrep"
+          "$SEMGREP" scan --config auto --sarif --output reports/semgrep.sarif .
 
       - name: "Upload source security reports"
         if: always()
