@@ -145,3 +145,66 @@ jobs:
             reports/sbom.cdx.json
           if-no-files-found: warn
           retention-days: 30
+
+  publish-sign:
+    name: "Publish and sign image"
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    needs: container-security
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: "Check out Git repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 # v3.8.0
+
+      - name: "Log in to GHCR"
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Build and push digest-pinned image"
+        id: build
+        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.1.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            BUILD_DATE=${{ github.run_started_at }}
+            VCS_REF=${{ github.sha }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/juice-shop:${{ github.sha }}
+          outputs: type=registry
+
+      - name: "Generate SBOM"
+        run: |
+          mkdir -p reports
+          docker run --rm \
+            anchore/syft:v1.20.0 \
+            ghcr.io/${{ github.repository_owner }}/juice-shop@${{ steps.build.outputs.digest }} \
+            -o cyclonedx-json \
+            > reports/sbom.cdx.json
+
+      - name: "Install Cosign"
+        run: |
+          COSIGN_VERSION="v3.1.5"
+          curl -fsSLo cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          chmod 0755 cosign
+          sudo mv cosign /usr/local/bin/cosign
+          cosign version
+
+      - name: "Sign image and SBOM attestation"
+        env:
+          COSIGN_YES: "true"
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/juice-shop@${{ steps.build.outputs.digest }}"
+          cosign sign "$IMAGE"
+          cosign attest --type cyclonedx --predicate reports/sbom.cdx.json "$IMAGE"
+          cosign verify "$IMAGE" --certificate-identity-regexp "^https://github.com/${{ github.repository_owner }}/juice-shop/.github/workflows/devsecops-baseline.yml@refs/heads/" --certificate-oidc-issuer https://token.actions.githubusercontent.com

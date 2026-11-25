@@ -1,0 +1,21 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-signed-juice-shop-images
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: verify-keyless-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - type: sigstore
+          attestors:
+            - entries:
+                - keyless:
+                    issuer: "https://token.actions.githubusercontent.com"
+                    subject: "https://github.com/Andersss819/juice-shop/.github/workflows/devsecops-baseline.yml@refs/heads/devsecops/baseline"
