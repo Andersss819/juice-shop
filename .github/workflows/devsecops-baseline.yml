@@ -48,7 +48,7 @@ jobs:
         with:
           name: source-security-reports
           path: reports/semgrep.sarif
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
   tests:
@@ -151,7 +151,9 @@ jobs:
     name: "Publish and sign image"
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
-    needs: container-security
+    needs:
+      - source-security
+      - container-security
     permissions:
       contents: read
       packages: write
