@@ -1,0 +1,68 @@
+name: "DevSecOps baseline"
+
+on:
+  push:
+    branches:
+      - master
+      - "devsecops/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  source-security:
+    name: "Secrets and source code"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check out full Git history"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: "Scan Git history for secrets"
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_SUMMARY: "true"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+
+      - name: "Install Semgrep"
+        run: python3 -m pip install --user semgrep
+
+      - name: "Scan source code with Semgrep"
+        run: |
+          mkdir -p reports
+          python3 -m semgrep scan --config auto --sarif --output reports/semgrep.sarif --error .
+
+      - name: "Upload source security reports"
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: source-security-reports
+          path: reports/semgrep.sarif
+          if-no-files-found: error
+          retention-days: 30
+
+  tests:
+    name: "Application tests"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check out Git repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: "Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: "Install dependencies"
+        run: npm install
+
+      - name: "Run application tests"
+        run: npm test
